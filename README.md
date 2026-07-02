@@ -1,6 +1,8 @@
 # 🌍 Temblore - Monitor de Sismos 3D
 
-![Temblore Preview](https://img.shields.io/badge/Estado-Activo-success.svg) ![Licencia](https://img.shields.io/badge/Licencia-MIT-blue.svg) ![Autor](https://img.shields.io/badge/by-jeancode-blueviolet)
+![Temblore Preview](./Captura.PNG)
+
+![Estado](https://img.shields.io/badge/Estado-Activo-success.svg) ![Licencia](https://img.shields.io/badge/Licencia-MIT-blue.svg) ![Autor](https://img.shields.io/badge/by-jeancode-blueviolet)
 
 **Temblore** es una aplicación web interactiva que permite visualizar, filtrar y realizar un seguimiento en tiempo real de los sismos a nivel mundial en un espectacular globo 3D utilizando CesiumJS y la API oficial del USGS (United States Geological Survey).
 
