@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Globo terráqueo 3D interactivo que muestra terremotos en tiempo real con datos del USGS">
+    <title>Temblore — Monitor Sísmico Global</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <!-- CesiumJS Dependencies -->
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay">
+        <div class="loader">
+            <div class="loader-ring"></div>
+            <div class="loader-text">
+                <span class="loader-icon"></span>
+                <h2>Temblore</h2>
+                <p id="loading-status">Cargando datos sísmicos...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3D Cesium Container -->
+    <div id="cesiumContainer"></div>
+
+    <!-- Header -->
+    <header id="header">
+        <div class="logo">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+            <h1>TEMBLORE</h1>
+        </div>
+        <p class="subtitle">Monitor de Sismos <span class="credits">by jeancode</span></p>
+    </header>
+
+    <!-- Stats Bar -->
+    <div id="stats-bar">
+        <div class="stat">
+            <span class="stat-value" id="stat-total">—</span>
+            <span class="stat-label">Total Sismos</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+            <span class="stat-value" id="stat-max-mag">—</span>
+            <span class="stat-label">Mag. Máxima</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+            <span class="stat-value" id="stat-avg-mag">—</span>
+            <span class="stat-label">Mag. Promedio</span>
+        </div>
+    </div>
+
+    <!-- Filters Panel -->
+    <div id="filters-panel">
+        <div class="filter-group">
+            <label>Magnitud (<span id="mag-val-display" class="highlight-val">2.5 - 10.0</span>)</label>
+            <div class="filter-row">
+                <input type="number" id="filter-mag-min" min="0.0" max="10.0" step="0.1" value="2.5" class="custom-input" title="Magnitud Mínima">
+                <span class="filter-separator">-</span>
+                <input type="number" id="filter-mag-max" min="0.0" max="10.0" step="0.1" value="10.0" class="custom-input" title="Magnitud Máxima">
+            </div>
+        </div>
+        <div class="filter-divider"></div>
+        <div class="filter-group">
+            <label for="filter-period">Período</label>
+            <select id="filter-period">
+                <option value="hour">1 Hora</option>
+                <option value="day">24 Horas</option>
+                <option value="week" selected>7 Días</option>
+                <option value="month">30 Días</option>
+            </select>
+        </div>
+        <div class="filter-divider"></div>
+        <div class="filter-group">
+            <label for="filter-light">Iluminación</label>
+            <select id="filter-light">
+                <option value="0" selected>Día/Noche</option>
+                <option value="3">Plano</option>
+            </select>
+        </div>
+        <div class="filter-divider"></div>
+        <button id="btn-settings" class="icon-btn" title="Configuraciones">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"></path>
+            </svg>
+        </button>
+        <button id="btn-refresh" class="icon-btn" title="Refrescar datos">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 4v6h-6"></path>
+                <path d="M1 20v-6h6"></path>
+                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path>
+            </svg>
+        </button>
+    </div>
+
+    <!-- Sidebar - Earthquake Details -->
+    <div id="sidebar" class="hidden">
+        <button id="sidebar-close" title="Cerrar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
+        <div id="quake-detail">
+            <div class="quake-magnitude-display">
+                <span id="detail-magnitude">—</span>
+                <span id="detail-mag-type" class="mag-type">—</span>
+            </div>
+            <h3 id="detail-place">—</h3>
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <span class="detail-icon">📍</span>
+                    <div>
+                        <span class="detail-label">Coordenadas</span>
+                        <span class="detail-value" id="detail-coords">—</span>
+                    </div>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-icon">📏</span>
+                    <div>
+                        <span class="detail-label">Profundidad</span>
+                        <span class="detail-value" id="detail-depth">—</span>
+                    </div>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-icon">🕐</span>
+                    <div>
+                        <span class="detail-label">Fecha / Hora</span>
+                        <span class="detail-value" id="detail-time">—</span>
+                    </div>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-icon">👥</span>
+                    <div>
+                        <span class="detail-label">Reportes</span>
+                        <span class="detail-value" id="detail-felt">—</span>
+                    </div>
+                </div>
+            </div>
+            <a id="detail-link" href="#" target="_blank" rel="noopener" class="detail-link">
+                Ver en USGS
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"></path>
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+            </a>
+        </div>
+    </div>
+
+    <!-- Earthquake List -->
+    <div id="quake-list-panel">
+        <div class="quake-list-header">
+            <h3>Sismos Recientes</h3>
+            <span id="quake-list-count" class="quake-list-count"></span>
+        </div>
+        <div id="quake-list"></div>
+    </div>
+
+    <!-- Tooltip -->
+    <div id="tooltip" class="hidden"></div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="hidden">
+        <div class="settings-header">
+            <h3>Configuración</h3>
+            <button id="btn-settings-close" class="icon-btn" style="width:24px; height:24px; border:none;" title="Cerrar">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div class="settings-body">
+            <div class="setting-item">
+                <div class="setting-info">
+                    <h4>Fronteras Políticas</h4>
+                    <p>Muestra los límites de los países</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-borders" checked>
+                    <span class="slider round"></span>
+                </label>
+            </div>
+            <div class="setting-item">
+                <div class="setting-info">
+                    <h4>Seguimiento Automático</h4>
+                    <p>Busca sismos nuevos en tiempo real</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-realtime">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+            <div class="setting-item">
+                <div class="setting-info">
+                    <h4>Nombres Geográficos</h4>
+                    <p>Etiquetas de ciudades y países</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-labels">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+            <div class="setting-item">
+                <div class="setting-info">
+                    <h4>Carreteras y Estados</h4>
+                    <p>Muestra vías principales y divisiones</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-roads">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+        </div>
+    </div>
+    <!-- Cesium Global Config and App -->
+    <script>
+        window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/";
+    </script>
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>
