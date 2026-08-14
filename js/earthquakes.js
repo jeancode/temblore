@@ -32,6 +32,10 @@ export class EarthquakeManager {
         // Data source for markers
         this.dataSource = new Cesium.CustomDataSource('earthquakes');
         this.viewer.dataSources.add(this.dataSource);
+
+        // Data source for active highlighted earthquake (Crosshair beacon & radar pulse rings)
+        this.highlightSource = new Cesium.CustomDataSource('quakeHighlight');
+        this.viewer.dataSources.add(this.highlightSource);
         
         // Active animated shockwaves
         this.activeWaves = [];
@@ -93,15 +97,20 @@ export class EarthquakeManager {
             // Trigger initial waves for recent large quakes
             const ageHours = (Date.now() - feature.properties.time) / 3600000;
             if (ageHours < 24 && mag >= 3.0) {
-                this.triggerWaves(entity);
+                this.triggerWaves(feature.id);
             }
         });
     }
 
     // --- Shockwaves (Cesium Ellipses) ---
-    triggerWaves(entityId) {
-        const feature = this.quakeData.find(f => f.id === entityId);
-        if (!feature) return;
+    triggerWaves(featureOrId) {
+        let feature;
+        if (typeof featureOrId === 'object' && featureOrId && featureOrId.geometry) {
+            feature = featureOrId;
+        } else {
+            feature = this.quakeData.find(f => f.id === featureOrId);
+        }
+        if (!feature || !feature.geometry || !feature.geometry.coordinates) return;
         const [lng, lat] = feature.geometry.coordinates;
         const mag = feature.properties.mag || 1;
         const color = getMagnitudeColor(mag);
@@ -190,4 +199,117 @@ export class EarthquakeManager {
     getEntityById(featureId) {
         return this.dataSource.entities.getById(featureId);
     }
+
+    // --- Highlight Active Earthquake (Target Beacon & Radiating Rings) ---
+    highlightQuake(featureOrId) {
+        let feature;
+        if (typeof featureOrId === 'object' && featureOrId && featureOrId.geometry) {
+            feature = featureOrId;
+        } else {
+            feature = this.quakeData.find(f => f.id === featureOrId);
+        }
+        if (!feature || !feature.geometry || !feature.geometry.coordinates) return;
+
+        this.highlightSource.entities.removeAll();
+
+        const [lng, lat] = feature.geometry.coordinates;
+        const mag = feature.properties.mag || 1;
+        const color = getMagnitudeColor(mag);
+        const colorCss = color.toCssColorString();
+
+        // 1. High-Tech Target Crosshair Marker Billboard (always on top)
+        const targetCanvas = createTargetCanvas(colorCss);
+        this.highlightSource.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(lng, lat, 2000),
+            billboard: {
+                image: targetCanvas,
+                width: 52,
+                height: 52,
+                verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            }
+        });
+
+        // 2. Animated Radiating Sonar/Beacon Rings
+        const beaconDuration = 2.0;
+        const maxRadius = Math.max(80000, mag * 120000);
+
+        for (let i = 0; i < 2; i++) {
+            const delay = i * 1.0;
+            const startTime = performance.now() / 1000 + delay;
+
+            const radiusCb = new Cesium.CallbackProperty(() => {
+                const now = performance.now() / 1000;
+                const elapsed = now - startTime;
+                if (elapsed < 0) return 1.0;
+                const progress = (elapsed % beaconDuration) / beaconDuration;
+                return Math.max(1.0, progress * maxRadius);
+            }, false);
+
+            const matCb = new Cesium.ColorMaterialProperty(
+                new Cesium.CallbackProperty(() => {
+                    const now = performance.now() / 1000;
+                    const elapsed = now - startTime;
+                    if (elapsed < 0) return color.withAlpha(0);
+                    const progress = (elapsed % beaconDuration) / beaconDuration;
+                    const alpha = Math.max(0, 0.75 * (1 - progress));
+                    return color.withAlpha(alpha);
+                }, false)
+            );
+
+            this.highlightSource.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(lng, lat, 1500),
+                ellipse: {
+                    semiMinorAxis: radiusCb,
+                    semiMajorAxis: radiusCb,
+                    material: matCb,
+                    outline: true,
+                    outlineColor: matCb,
+                    outlineWidth: 3,
+                    height: 1500
+                }
+            });
+        }
+
+        // Also trigger one-shot shockwave burst
+        this.triggerWaves(feature);
+    }
+}
+
+// Generate Target Crosshair Canvas for 3D Marker
+function createTargetCanvas(colorHex = '#ef4444') {
+    const canvas = document.createElement('canvas');
+    canvas.width = 96;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+
+    // Outer glow ring
+    ctx.strokeStyle = colorHex;
+    ctx.lineWidth = 4;
+    ctx.shadowColor = colorHex;
+    ctx.shadowBlur = 12;
+
+    ctx.beginPath();
+    ctx.arc(48, 48, 34, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Crosshairs
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(48, 6); ctx.lineTo(48, 22);
+    ctx.moveTo(48, 74); ctx.lineTo(48, 90);
+    ctx.moveTo(6, 48); ctx.lineTo(22, 48);
+    ctx.moveTo(74, 48); ctx.lineTo(90, 48);
+    ctx.stroke();
+
+    // Inner bright core
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(48, 48, 9, 0, Math.PI * 2);
+    ctx.fill();
+
+    return canvas;
 }

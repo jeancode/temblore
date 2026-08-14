@@ -1,16 +1,17 @@
 // ============================================
 // app.js — Main Entry Point (CesiumJS)
 // ============================================
-import { EarthquakeManager } from './earthquakes.js';
-import { setupUI, showLoading, hideLoading, updateStats, showQuakeInfo, hideQuakeInfo, updateQuakeList, showTooltip, hideTooltip } from './ui.js';
+import { EarthquakeManager } from './earthquakes.js?v=2.11';
+import { setupUI, showLoading, hideLoading, updateStats, showQuakeInfo, hideQuakeInfo, updateQuakeList, selectQuakeInList, showTooltip, hideTooltip } from './ui.js?v=2.11';
+import { LiveMonitorManager } from './liveMonitor.js?v=2.11';
 
 // --- State ---
 let viewer;
 let quakeManager = null;
-let bordersDataSource = null;
+let liveMonitor = null;
+let bordersLayer = null;
 let labelsLayer = null;
 let roadsLayer = null;
-let statesLayer = null;
 let realtimeInterval = null;
 let lastKnownQuakeId = null;
 
@@ -44,14 +45,24 @@ async function init() {
     // Remove the default Cesium logo/credits
     viewer.cesiumWidget.creditContainer.style.display = 'none';
 
-    // Optimize camera for a good initial view
+    // Optimize camera for a good initial view over Mexico & Americas
     viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(-90, 20, 20000000), // View over Americas
+        destination: Cesium.Cartesian3.fromDegrees(-102, 23, 6000000), // View over Mexico
+        orientation: {
+            heading: Cesium.Math.toRadians(0),
+            pitch: Cesium.Math.toRadians(-90),
+            roll: 0.0
+        },
         duration: 0
     });
 
     // Earthquake Manager
     quakeManager = new EarthquakeManager(viewer);
+
+    // Live Country Monitor Manager (Default: México)
+    // onQuakeFocus moves camera, onQuakeSelect opens info and highlights without moving camera
+    liveMonitor = new LiveMonitorManager(viewer, onQuakeFocus, onQuakeSelect);
+    liveMonitor.start();
 
     // UI
     setupUI(
@@ -60,7 +71,7 @@ async function init() {
             showLoading('Cargando sismos...');
             const quakes = await quakeManager.loadData(min, max, period);
             updateStats(quakes);
-            updateQuakeList(quakes, onQuakeListItemClick);
+            updateQuakeList(quakes, onQuakeFocus);
             hideLoading();
         },
         // onRefresh
@@ -71,7 +82,7 @@ async function init() {
             showLoading('Actualizando datos...');
             const quakes = await quakeManager.loadData(min, max, period);
             updateStats(quakes);
-            updateQuakeList(quakes, onQuakeListItemClick);
+            updateQuakeList(quakes, onQuakeFocus);
             hideLoading();
         },
         // onLightChange
@@ -85,25 +96,9 @@ async function init() {
         // onToggleBorders
         async (visible) => {
             if (visible) {
-                if (!bordersDataSource) {
-                    showLoading('Cargando fronteras...');
-                    try {
-                        bordersDataSource = await Cesium.GeoJsonDataSource.load(
-                            'https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_110m_admin_0_countries.geojson', {
-                            stroke: Cesium.Color.fromCssColorString('rgba(255,255,255,0.4)'),
-                            fill: Cesium.Color.TRANSPARENT,
-                            strokeWidth: 2
-                        });
-                        viewer.dataSources.add(bordersDataSource);
-                    } catch (e) {
-                        console.error('Error loading borders:', e);
-                    }
-                    hideLoading();
-                } else {
-                    bordersDataSource.show = true;
-                }
+                await loadBorders();
             } else {
-                if (bordersDataSource) bordersDataSource.show = false;
+                if (bordersLayer) bordersLayer.show = false;
             }
         },
         // onRealTimeToggle
@@ -145,26 +140,12 @@ async function init() {
                     } catch (e) {
                         console.error('Error loading roads:', e);
                     }
+                    hideLoading();
                 } else {
                     roadsLayer.show = true;
                 }
-                
-                if (!statesLayer) {
-                    try {
-                        const statesProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-                            'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer'
-                        );
-                        statesLayer = viewer.imageryLayers.addImageryProvider(statesProvider);
-                    } catch (e) {
-                        console.error('Error loading states:', e);
-                    }
-                    hideLoading();
-                } else {
-                    statesLayer.show = true;
-                }
             } else {
                 if (roadsLayer) roadsLayer.show = false;
-                if (statesLayer) statesLayer.show = false;
             }
         }
     );
@@ -172,24 +153,7 @@ async function init() {
     // Initial check for borders toggle
     const toggleBorders = document.getElementById('toggle-borders');
     if (toggleBorders && toggleBorders.checked) {
-        setupUI.onToggleBorders = true;
-        document.getElementById('toggle-borders').dispatchEvent(new Event('change'));
-        setupUI.onToggleBorders = false;
-        
-        // Let's actually load it right away since it's checked by default
-        showLoading('Cargando fronteras...');
-        try {
-            bordersDataSource = await Cesium.GeoJsonDataSource.load(
-                'https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_110m_admin_0_countries.geojson', {
-                stroke: Cesium.Color.fromCssColorString('rgba(255,255,255,0.4)'),
-                fill: Cesium.Color.TRANSPARENT,
-                strokeWidth: 2
-            });
-            viewer.dataSources.add(bordersDataSource);
-        } catch (e) {
-            console.error('Error loading borders:', e);
-        }
-        hideLoading();
+        await loadBorders();
     }
 
     // Setup Cesium Picking (Raycasting equivalent) for tooltips
@@ -211,15 +175,14 @@ async function init() {
         }
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
-    // Click event
+    // Click event on globe markers
     handler.setInputAction(function (movement) {
         const pickedObject = viewer.scene.pick(movement.position);
         if (Cesium.defined(pickedObject) && pickedObject.id && typeof pickedObject.id.id === 'string') {
             const entityId = pickedObject.id.id;
             const feature = quakeManager.quakeData.find(f => f.id === entityId);
             if (feature) {
-                showQuakeInfo(feature);
-                quakeManager.triggerWaves(entityId);
+                onQuakeSelect(feature);
             }
         }
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
@@ -231,10 +194,27 @@ async function init() {
         lastKnownQuakeId = quakes[0].id; // The USGS feed usually sorts newest first
     }
     updateStats(quakes);
-    updateQuakeList(quakes, onQuakeListItemClick);
+    updateQuakeList(quakes, onQuakeFocus);
 
     // Hide loading
     hideLoading();
+}
+
+async function loadBorders() {
+    if (!bordersLayer) {
+        showLoading('Cargando fronteras...');
+        try {
+            const provider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+                'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer'
+            );
+            bordersLayer = viewer.imageryLayers.addImageryProvider(provider);
+        } catch (e) {
+            console.error('Error loading borders:', e);
+        }
+        hideLoading();
+    } else {
+        bordersLayer.show = true;
+    }
 }
 
 async function checkRealtimeUpdates() {
@@ -245,7 +225,7 @@ async function checkRealtimeUpdates() {
     // Fetch silently
     const quakes = await quakeManager.loadData(min, max, period);
     updateStats(quakes);
-    updateQuakeList(quakes, onQuakeListItemClick);
+    updateQuakeList(quakes, onQuakeFocus);
     
     if (quakes.length > 0) {
         const newestQuake = quakes[0]; // Assuming index 0 is newest (USGS format)
@@ -254,25 +234,42 @@ async function checkRealtimeUpdates() {
             lastKnownQuakeId = newestQuake.id;
             
             // Auto fly and show info
-            onQuakeListItemClick(newestQuake);
-            
-            // Optionally show a mini notification? The info panel is enough.
+            onQuakeFocus(newestQuake);
         } else {
             lastKnownQuakeId = newestQuake.id;
         }
     }
 }
 
-function onQuakeListItemClick(feature) {
+// Select quake: shows info, highlights in list and creates target beacon on 3D globe (WITHOUT camera flight)
+export function onQuakeSelect(feature) {
+    if (!feature || !feature.geometry || !feature.geometry.coordinates) return;
+
+    // Show sidebar info
     showQuakeInfo(feature);
-    
-    // Trigger waves using the string ID
-    quakeManager.triggerWaves(feature.id);
-    
-    // Fly camera to earthquake!
+
+    // Highlight target on 3D globe with high-tech crosshair beacon & pulsing radar rings
+    quakeManager.highlightQuake(feature);
+
+    // Highlight item in the recent earthquake list
+    selectQuakeInList(feature, onQuakeFocus);
+}
+
+// Focus quake: calls onQuakeSelect AND flies camera top-down directly over the epicenter
+export function onQuakeFocus(feature) {
+    if (!feature || !feature.geometry || !feature.geometry.coordinates) return;
+
+    onQuakeSelect(feature);
+
+    // Fly camera directly above the earthquake epicenter looking straight down
     const [lng, lat] = feature.geometry.coordinates;
     viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(lng, lat, 2000000), // 2000km high
+        destination: Cesium.Cartesian3.fromDegrees(lng, lat, 1200000), // 1200km altitude
+        orientation: {
+            heading: Cesium.Math.toRadians(0),
+            pitch: Cesium.Math.toRadians(-90), // Look straight down at the ground
+            roll: 0.0
+        },
         duration: 1.5
     });
 }

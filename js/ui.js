@@ -1,7 +1,7 @@
 // ============================================
 // ui.js — Panel Lateral, Filtros, Estadísticas
 // ============================================
-import { getMagnitudeClass } from './earthquakes.js';
+import { getMagnitudeClass } from './earthquakes.js?v=2.3';
 
 // --- DOM References ---
 const $ = (id) => document.getElementById(id);
@@ -40,6 +40,13 @@ function initElements() {
         detailLink: $('detail-link'),
         quakeList: $('quake-list'),
         quakeListCount: $('quake-list-count'),
+        quakeListPanel: $('quake-list-panel'),
+        btnCloseList: $('btn-close-list'),
+        btnFabList: $('btn-fab-list'),
+        liveMonitorPanel: $('live-monitor-panel'),
+        btnCloseLive: $('btn-close-live'),
+        btnFabLive: $('btn-fab-live'),
+        toggleLivePanel: $('toggle-live-panel'),
         tooltip: $('tooltip'),
     };
 }
@@ -66,6 +73,58 @@ export function setupUI(onFilterChange, onRefresh, onLightChange, onToggleBorder
     elements.filterMagMin.addEventListener('change', triggerFilter);
     elements.filterMagMax.addEventListener('change', triggerFilter);
     elements.filterPeriod.addEventListener('change', triggerFilter);
+
+    // Live Monitor Panel Toggle Handlers
+    const setLiveMonitorVisibility = (visible) => {
+        if (!elements.liveMonitorPanel) return;
+        if (visible) {
+            elements.liveMonitorPanel.classList.remove('hidden');
+            if (elements.btnFabLive) elements.btnFabLive.classList.add('active');
+            if (elements.toggleLivePanel) elements.toggleLivePanel.checked = true;
+        } else {
+            elements.liveMonitorPanel.classList.add('hidden');
+            if (elements.btnFabLive) elements.btnFabLive.classList.remove('active');
+            if (elements.toggleLivePanel) elements.toggleLivePanel.checked = false;
+        }
+    };
+
+    if (elements.btnCloseLive) {
+        elements.btnCloseLive.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setLiveMonitorVisibility(false);
+        });
+    }
+    if (elements.btnFabLive) {
+        elements.btnFabLive.addEventListener('click', () => {
+            const isHidden = elements.liveMonitorPanel?.classList.contains('hidden');
+            setLiveMonitorVisibility(isHidden);
+        });
+    }
+
+    // Quake List Panel Toggle Handlers
+    const setQuakeListVisibility = (visible) => {
+        if (!elements.quakeListPanel) return;
+        if (visible) {
+            elements.quakeListPanel.classList.remove('hidden');
+            if (elements.btnFabList) elements.btnFabList.classList.add('active');
+        } else {
+            elements.quakeListPanel.classList.add('hidden');
+            if (elements.btnFabList) elements.btnFabList.classList.remove('active');
+        }
+    };
+
+    if (elements.btnCloseList) {
+        elements.btnCloseList.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setQuakeListVisibility(false);
+        });
+    }
+    if (elements.btnFabList) {
+        elements.btnFabList.addEventListener('click', () => {
+            const isHidden = elements.quakeListPanel?.classList.contains('hidden');
+            setQuakeListVisibility(isHidden);
+        });
+    }
 
     // Settings Modal
     if (elements.btnSettings) {
@@ -251,6 +310,7 @@ export function updateQuakeList(quakes, onItemClick) {
         const item = document.createElement('div');
         item.className = 'quake-item';
         item.setAttribute('data-index', idx);
+        item.setAttribute('data-id', feature.id);
 
         const timeAgo = getTimeAgo(props.time);
 
@@ -271,6 +331,53 @@ export function updateQuakeList(quakes, onItemClick) {
 
         list.appendChild(item);
     });
+}
+
+// Select and highlight earthquake in the recent list
+export function selectQuakeInList(feature, onItemClick) {
+    if (!feature) return;
+    const list = elements.quakeList;
+    if (!list) return;
+
+    let targetItem = null;
+    list.querySelectorAll('.quake-item').forEach(el => {
+        el.classList.remove('active');
+        if (el.getAttribute('data-id') === feature.id) {
+            targetItem = el;
+        }
+    });
+
+    if (targetItem) {
+        targetItem.classList.add('active');
+        targetItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+        // Prepend live earthquake to list with distinct badge
+        const props = feature.properties;
+        const mag = props.mag || 0;
+        const magClass = getMagnitudeClass(mag);
+        const timeAgo = getTimeAgo(props.time);
+
+        const item = document.createElement('div');
+        item.className = 'quake-item active quake-item-live-highlight';
+        item.setAttribute('data-id', feature.id);
+
+        item.innerHTML = `
+            <div class="quake-item-mag ${magClass}">${mag.toFixed(1)}</div>
+            <div class="quake-item-info">
+                <div class="quake-item-place"><span class="live-tag">EN VIVO</span> ${props.place || 'Desconocido'}</div>
+                <div class="quake-item-time">${timeAgo}</div>
+            </div>
+        `;
+
+        item.addEventListener('click', () => {
+            list.querySelectorAll('.quake-item').forEach(el => el.classList.remove('active'));
+            item.classList.add('active');
+            if (onItemClick) onItemClick(feature);
+        });
+
+        list.prepend(item);
+        item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
 }
 
 // --- Tooltip ---
